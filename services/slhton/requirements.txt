@@ -1,0 +1,9 @@
+Flask==2.3.2
+Flask-HTTPAuth==4.7.0
+pycryptodome==3.19.0
+SQLAlchemy==2.0.19
+python-dotenv==1.0.0
+requests==2.31.0
+aiohttp==3.8.4
+gunicorn==20.1.0
+web3==6.20.1

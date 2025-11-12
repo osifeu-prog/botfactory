@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="he">
+<head><meta charset="utf-8"><title>Referral Created</title></head>
+<body style="direction:rtl;font-family:Arial;padding:20px;">
+    <h2>לינק הפניה נוצר</h2>
+    <p>משתמש id: {{ user_id }}</p>
+    {% if link %}
+        <p>העתק את הלינק ושיתוף עם המשתמש:</p>
+        <pre>{{ link }}</pre>
+    {% else %}
+        <p>לא הצלחנו ליצור לינק (לא נמצא שם בוט). ודא שהטוקן תקין.</p>
+    {% endif %}
+    <p><a href="/admin">חזרה לפאנל</a></p>
+</body>
+</html>

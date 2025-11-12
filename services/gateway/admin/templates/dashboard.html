@@ -1,0 +1,359 @@
+<!-- admin/templates/dashboard.html -->
+<!DOCTYPE html>
+<html lang="he">
+<head>
+    <meta charset="utf-8">
+    <title>פאנל ניהול הבוטים</title>
+    <style>
+        body { font-family: Arial, sans-serif; direction: rtl; background:#f4f7fb; margin:20px; }
+        .container { max-width:1200px; margin:0 auto; }
+        header { display:flex; justify-content:space-between; align-items:center; }
+        h1 { margin:0; }
+        .small { font-size:0.9em; color:#666; }
+        .box { background:#fff; padding:12px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.06); margin-top:10px; }
+        button { padding:6px 10px; margin-left:6px; cursor:pointer; }
+        pre { background:#f7f9fc; padding:10px; border-radius:6px; overflow:auto; max-height:300px; }
+        table { width:100%; border-collapse:collapse; margin-top:8px; }
+        th, td { padding:8px; border-bottom:1px solid #eee; text-align:right; }
+        .leader { display:flex; gap:12px; flex-wrap:wrap; }
+        .leader .card { background:#fff; padding:8px 12px; border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,0.04); }
+        .status-healthy { color: #2e7d32; }
+        .status-warning { color: #f57c00; }
+        .status-error { color: #d32f2f; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+        .stat-card { background: #fff; padding: 12px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); text-align: center; }
+        .stat-value { font-size: 1.5em; font-weight: bold; margin: 4px 0; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>📊 פאנל ניהול הבוטים</h1>
+        <div class="small">שרת: {{ system.domain }} • בוטים: {{ system.bot_count }} • הודעות: {{ system.message_count }} • תלויים: {{ system.pending_count }}</div>
+    </header>
+
+    <!-- סעיף מדדים חדש -->
+    <div class="box">
+        <h3>📈 מדדים ותקלות</h3>
+        <div class="stats-grid">
+            <div class="stat-card" style="background: #e8f5e8;">
+                <div>הודעות שהתקבלו</div>
+                <div class="stat-value">{{ system.message_count }}</div>
+                <div class="small">סה"כ</div>
+            </div>
+            <div class="stat-card" style="background: #fff3e0;">
+                <div>בקשות ממתינות</div>
+                <div class="stat-value">{{ system.pending_count }}</div>
+                <div class="small">לאישור</div>
+            </div>
+            <div class="stat-card" style="background: #ffebee;">
+                <div>תקלות חיבור</div>
+                <div class="stat-value">{{ system.connection_errors }}</div>
+                <div class="small">סה"כ</div>
+            </div>
+            <div class="stat-card" style="background: #e3f2fd;">
+                <div>שליחות מוצלחות</div>
+                <div class="stat-value">{{ system.successful_sends }}</div>
+                <div class="small">≈</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="box">
+        <h3>מצב Webhooks מהיר</h3>
+        <div>
+            {% for w in webhook_summary %}
+                <div>
+                    <strong>{{ w.env_key }}</strong> — index: {{ w.bot_index }} — token: {{ 'כן' if w.has_token else 'לא' }}
+                </div>
+            {% endfor %}
+        </div>
+        <div style="margin-top:10px;">
+            <button onclick="fetchWebhookInfo()">הצג getWebhookInfo לכל הטוקנים</button>
+            <button onclick="resetWebhooks()">אפס/הגדר Webhooks (setWebhook)</button>
+            <button onclick="checkBotsHealth()">בדיקת בריאות הבוטים</button>
+        </div>
+        <div id="webhookResults" style="margin-top:10px;"></div>
+        <div id="healthResults" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="box" style="margin-top:12px;">
+        <h3>גרף פעילות לפי שעות</h3>
+        <img src="data:image/png;base64,{{ plot_b64 }}" alt="activity" style="width:100%;">
+    </div>
+
+    <div class="box" style="margin-top:12px;">
+        <h3>טבלת פניות ממתינות לאישור</h3>
+        {% if pending %}
+            <table>
+                <tr><th>זמן</th><th>בוט</th><th>משתמש</th><th>טקסט</th><th>פעולות</th></tr>
+                {% for p in pending %}
+                <tr style="background:#fffbe6;">
+                    <td>{{ p.timestamp }}</td>
+                    <td>{{ p.bot }}</td>
+                    <td>{{ p.user }}</td>
+                    <td>{{ p.text }}</td>
+                    <td>
+                        <form style="display:inline" method="post" action="/approve">
+                            <input type="hidden" name="entry_id" value="{{ p.id }}">
+                            <button type="submit">אשר</button>
+                        </form>
+                        <button onclick="openReject('{{ p.id }}')">דחה</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </table>
+        {% else %}
+            <div class="small">אין בקשות ממתינות כרגע.</div>
+        {% endif %}
+    </div>
+
+    <div class="box" style="margin-top:12px;">
+        <h3>לוח מובילים (Leaderboard)</h3>
+        <div class="leader">
+            {% for item in leaderboard %}
+                <div class="card"><strong>{{ item.user_id }}</strong><br><small>נקודות: {{ item.points }}</small></div>
+            {% endfor %}
+        </div>
+        <div style="margin-top:8px;">
+            <form method="post" action="/generate_referral">
+                <label>צור לינק הפניה עבור משתמש (user_id):</label>
+                <select name="env_key">
+                    {% for w in webhook_summary %}
+                        <option value="{{ w.env_key }}">{{ w.env_key }}</option>
+                    {% endfor %}
+                </select>
+                <input type="text" name="user_id" placeholder="הקלד chat_id של המשתמש">
+                <button type="submit">צור לינק</button>
+            </form>
+            <div style="margin-top:6px;">
+                <a href="/export/referrals.csv">ייצא CSV של ההפניות</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- סעיף ניהול קריפטו -->
+    <div class="box" style="margin-top:12px;">
+        <h3>💰 ניהול קריפטו</h3>
+        <div class="stats-grid">
+            <div class="stat-card" style="background: #e3f2fd;">
+                <div>ארנקים שנוצרו</div>
+                <div class="stat-value" id="walletCount">{{ system.crypto_wallet_count }}</div>
+                <div class="small">סה"כ</div>
+            </div>
+            <div class="stat-card" style="background: #e8f5e8;">
+                <div>עסקאות</div>
+                <div class="stat-value" id="transactionCount">{{ system.crypto_transaction_count }}</div>
+                <div class="small">היום</div>
+            </div>
+            <div class="stat-card" style="background: #fff3e0;">
+                <div>מחיר {{ system.token_symbol }}</div>
+                <div class="stat-value">${{ system.token_price }}</div>
+                <div class="small">נוכחי</div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 12px;">
+            <button onclick="loadCryptoStats()">רענן סטטיסטיקות</button>
+            <button onclick="showBusinessWallet()">ארנק עסקי</button>
+            <button onclick="exportWallets()">ייצא ארנקים</button>
+        </div>
+        
+        <div id="cryptoResults" style="margin-top: 10px;"></div>
+    </div>
+
+    <div class="box" style="margin-top:12px;">
+        <h3>כל ההודעות שהתקבלו (חדשות למעלה)</h3>
+        <table>
+            <tr><th>זמן</th><th>בוט</th><th>משתמש</th><th>צ'אט ID</th><th>טקסט</th><th>referrer</th><th>סטטוס</th></tr>
+            {% for m in messages %}
+            <tr>
+                <td>{{ m.timestamp }}</td>
+                <td>{{ m.bot }}</td>
+                <td>{{ m.user }}</td>
+                <td>{{ m.chat_id }}</td>
+                <td>{{ m.text }}</td>
+                <td>{{ m.referrer_id if m.referrer_id else "-" }}</td>
+                <td>
+                    {% if m.status == 'approved' %}
+                        <span style="color: green;">✓ אושר</span>
+                    {% elif m.status == 'rejected' %}
+                        <span style="color: red;">✗ נדחה</span>
+                    {% elif m.status == 'pending' %}
+                        <span style="color: orange;">⏳ ממתין</span>
+                    {% else %}
+                        {{ m.status }}
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+<!-- Reject modal -->
+<div id="rejectModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4);">
+    <div style="background:#fff; width:420px; margin:80px auto; padding:20px; border-radius:8px;">
+        <h3>דחיית פנייה</h3>
+        <form method="post" action="/reject">
+            <input type="hidden" id="rejectEntryId" name="entry_id" value="">
+            <div>
+                <label>סיבת הדחייה</label><br>
+                <textarea name="reason" rows="4" style="width:100%"></textarea>
+            </div>
+            <div style="margin-top:8px;">
+                <button type="submit">שלח דחייה</button>
+                <button type="button" onclick="closeReject()">בטל</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openReject(id){
+    document.getElementById('rejectEntryId').value = id;
+    document.getElementById('rejectModal').style.display = 'block';
+}
+function closeReject(){
+    document.getElementById('rejectModal').style.display = 'none';
+}
+
+async function fetchWebhookInfo(){
+    const resDiv = document.getElementById('webhookResults');
+    resDiv.innerHTML = 'שולח בקשה...';
+    try{
+        const r = await fetch('/webhook_info');
+        const data = await r.json();
+        resDiv.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+    }catch(e){
+        resDiv.innerHTML = '<pre>שגיאה: ' + e + '</pre>';
+    }
+}
+
+async function resetWebhooks(){
+    if(!confirm('האם לאפס/להגדיר שוב את כל ה‑webhooks עכשיו?')) return;
+    const resDiv = document.getElementById('webhookResults');
+    resDiv.innerHTML = 'מנסה להגדיר webhooks...';
+    try{
+        const r = await fetch('/reset_webhooks', {method:'POST'});
+        const data = await r.json();
+        resDiv.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+    }catch(e){
+        resDiv.innerHTML = '<pre>שגיאה: ' + e + '</pre>';
+    }
+}
+
+async function checkBotsHealth(){
+    const resDiv = document.getElementById('healthResults');
+    resDiv.innerHTML = 'בודק את מצב הבוטים...';
+    try{
+        const r = await fetch('/health_check');
+        const data = await r.json();
+        
+        let html = '<h4>דוח בריאות הבוטים:</h4>';
+        for (const [botName, info] of Object.entries(data)) {
+            const health = info.health;
+            let statusClass = 'status-error';
+            let statusText = '❌ תקלה';
+            
+            if (health.status === 'healthy') {
+                statusClass = 'status-healthy';
+                statusText = '✅ תקין';
+            } else if (health.status === 'timeout' || health.status === 'connection_error') {
+                statusClass = 'status-warning';
+                statusText = '⚠️ בעיית חיבור';
+            }
+            
+            html += `
+                <div style="margin: 8px 0; padding: 8px; border-left: 4px solid ${health.status === 'healthy' ? '#4caf50' : health.status === 'timeout' ? '#ff9800' : '#f44336'};">
+                    <strong>${botName}</strong> - <span class="${statusClass}">${statusText}</span>
+                    ${health.username ? `<br><small>שם: ${health.username} (ID: ${health.bot_id})</small>` : ''}
+                    ${health.error ? `<br><small>שגיאה: ${health.error}</small>` : ''}
+                </div>
+            `;
+        }
+        
+        resDiv.innerHTML = html;
+    }catch(e){
+        resDiv.innerHTML = '<pre>שגיאה: ' + e + '</pre>';
+    }
+}
+
+async function loadCryptoStats() {
+    const resDiv = document.getElementById('cryptoResults');
+    resDiv.innerHTML = 'טוען סטטיסטיקות...';
+    try {
+        const r = await fetch('/crypto_stats');
+        const data = await r.json();
+        
+        if (data.error) {
+            resDiv.innerHTML = '<pre>שגיאה: ' + data.error + '</pre>';
+            return;
+        }
+        
+        document.getElementById('walletCount').textContent = data.wallet_count;
+        document.getElementById('transactionCount').textContent = data.transaction_count;
+        
+        resDiv.innerHTML = `
+            <div style="color: green;">✅ סטטיסטיקות עודכנו</div>
+            <div>ארנקים: ${data.wallet_count}, עסקאות היום: ${data.transaction_count}</div>
+        `;
+    } catch(e) {
+        resDiv.innerHTML = '<pre>שגיאה: ' + e + '</pre>';
+    }
+}
+
+async function showBusinessWallet() {
+    const resDiv = document.getElementById('cryptoResults');
+    resDiv.innerHTML = 'טוען פרטי ארנק עסקי...';
+    try {
+        const r = await fetch('/business_wallet');
+        const data = await r.json();
+        
+        if (data.error) {
+            resDiv.innerHTML = '<pre>שגיאה: ' + data.error + '</pre>';
+            return;
+        }
+        
+        resDiv.innerHTML = `
+            <h4>ארנק עסקי:</h4>
+            <div><strong>כתובת:</strong> ${data.address}</div>
+            <div><strong>יתרת BNB:</strong> ${data.balance_bnb.toFixed(6)}</div>
+            <div><strong>ערך בדולר:</strong> $${data.balance_usd.toFixed(2)}</div>
+            <div><strong>רשת:</strong> ${data.network}</div>
+        `;
+    } catch(e) {
+        resDiv.innerHTML = '<pre>שגיאה: ' + e + '</pre>';
+    }
+}
+
+async function exportWallets() {
+    try {
+        const r = await fetch('/export_wallets');
+        if (r.ok) {
+            const blob = await r.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = 'wallets.csv';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.getElementById('cryptoResults').innerHTML = '<div style="color: green;">✅ הקובץ הורד</div>';
+        } else {
+            document.getElementById('cryptoResults').innerHTML = '<div style="color: red;">❌ שגיאה בהורדה</div>';
+        }
+    } catch(e) {
+        document.getElementById('cryptoResults').innerHTML = '<pre>שגיאה: ' + e + '</pre>';
+    }
+}
+
+// טען סטטיסטיקות קריפטו אוטומטית
+window.addEventListener('load', function() {
+    setTimeout(loadCryptoStats, 1000);
+    setTimeout(checkBotsHealth, 1000);
+});
+</script>
+</body>
+</html>

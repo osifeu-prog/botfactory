@@ -1,0 +1,235 @@
+
+**📋 הוראות:**
+1. שתף כתובת זו עם השולח
+2. המתן לקבלת העסקה
+3. האיזון יתעדכן אוטומטית
+
+💡 *אנשים יכולים לשלוח לך TON או כל מטבע על רשת TON לכתובת זו.*
+            """
+            self.bot.send_message(message.chat.id, address_text, parse_mode='Markdown')
+
+        @self.bot.message_handler(func=lambda message: message.text == '🔗 כתובת שלי')
+        def my_address_handler(message):
+            user_id = message.from_user.id
+            if user_id not in self.user_data:
+                self.user_data[user_id] = {
+                    'wallet_address': self.generate_wallet_address(),
+                    'balance': 0.0
+                }
+                
+            address_info = f"""
+🔗 **כתובת הארנק שלך:**
+
+**📧 כתובת מלאה:**
+`{self.user_data[user_id]['wallet_address']}`
+
+**🌐 רשת:** TON Mainnet
+**💼 סוג:** ארנק v4
+
+**📤 לשיתוף:** העתק את הכתובת ושלח לשולח
+**📥 לקבלה:** שלח כתובת זו לכל מי שרוצה לשלוח לך
+
+⚠️ **אזהרה:** אל תשתף את מפתח הפרטי שלך!
+            """
+            
+            markup = types.InlineKeyboardMarkup()
+            markup.row(
+                types.InlineKeyboardButton("📋 העתק כתובת", callback_data="copy_address"),
+                types.InlineKeyboardButton("🔄 צור ארנק חדש", callback_data="new_wallet")
+            )
+            
+            self.bot.send_message(
+                message.chat.id,
+                address_info,
+                reply_markup=markup,
+                parse_mode='Markdown'
+            )
+
+        @self.bot.message_handler(func=lambda message: message.text == '📊 מחיר TON')
+        def price_handler(message):
+            price_text = """
+💎 **מחיר TON עדכני:**
+
+**💰 מחיר נוכחי:** $2.45
+**📈 שינוי 24h:** +5.2%
+**📊 נפח 24h:** $85M
+**🕒 עדכון אחרון:** כעת
+
+**📈 ביצועים:**
+- 🟢 שבועי: +12.3%
+- 🟢 חודשי: +28.7%
+- 🔴 שנתי: -15.2%
+
+*מחירים מתעדכנים באופן רציף*
+            """
+            self.bot.send_message(message.chat.id, price_text, parse_mode='Markdown')
+
+        @self.bot.message_handler(func=lambda message: message.text == '🆘 עזרה')
+        def help_handler(message):
+            help_text = """
+🆘 **מדריך שימוש מלא**
+
+**👛 איזון** - הצגת איזון המטבעות
+**📤 שלח TON** - שליחת TON למישהו  
+**📥 קבל TON** - קבלת כתובת ארנק
+**📊 מחיר TON** - מחיר TON עדכני
+**🔗 כתובת שלי** - ניהול ופרטי ארנק
+
+**🔒 אבטחה:**
+- לעולם אל תשתף את מפתח הפרטי
+- שמור גיבוי למילים הסודיות
+- ודא שכתובות נכונות לפני שילוח
+
+**📞 תמיכה:**
+לבעיות נוספות פנה לתמיכה הטכנית.
+            """
+            self.bot.send_message(message.chat.id, help_text, parse_mode='Markdown')
+
+    def process_address(self, message):
+        address = message.text.strip()
+        
+        if not ton_manager.validate_address(address):
+            self.bot.send_message(
+                message.chat.id,
+                "❌ **כתובת לא תקינה!**\n\nאנא שלח כתובת TON תקינה (מתחיל ב-EQ או kQ):",
+                parse_mode='Markdown'
+            )
+            return
+            
+        self.bot.send_message(
+            message.chat.id,
+            f"✅ **כתובת תקינה:** `{address}`\n\nכעת הזן את הסכום לשילוח (ב-TON):",
+            parse_mode='Markdown'
+        )
+        self.bot.register_next_step_handler(message, self.process_amount, address)
+
+    def process_amount(self, message, address):
+        try:
+            amount = float(message.text)
+            if amount <= 0:
+                raise ValueError("סכום חיובי בלבד")
+                
+            confirm_text = f"""
+📤 **אישור שילוח**
+
+**👥 לכתובת:** 
+`{address}`
+
+**💎 סכום:** {amount:.4f} TON
+**💰 משוער:** ${amount * 2.45:.2f}
+**📝 הערה:** עסקה מה-TON בוט
+
+**⚠️ אישור סופי:**
+האם לאשר את השילוח?
+            """
+            
+            markup = types.InlineKeyboardMarkup()
+            markup.row(
+                types.InlineKeyboardButton("✅ אשר שילוח", callback_data=f"confirm_send_{amount}_{address}"),
+                types.InlineKeyboardButton("❌ בטל", callback_data="cancel_send")
+            )
+            
+            self.bot.send_message(
+                message.chat.id,
+                confirm_text,
+                reply_markup=markup,
+                parse_mode='Markdown'
+            )
+            
+        except ValueError:
+            self.bot.send_message(
+                message.chat.id, 
+                "❌ **סכום לא תקין!**\n\nאנא הזן סכום מספרי תקין (לדוגמה: 1.5):",
+                parse_mode='Markdown'
+            )
+
+    @self.bot.callback_query_handler(func=lambda call: True)
+    def callback_handler(self, call):
+        if call.data.startswith("confirm_send_"):
+            try:
+                # Extract amount and address from callback data
+                parts = call.data.split("_")
+                amount = float(parts[2])
+                address = "_".join(parts[3:])  # In case address contains underscores
+                
+                self.bot.edit_message_text(
+                    "🔄 **מעבד עסקה...**\n\nהעברת ה-TON בתהליך, יתעדכן תוך מספר דקות.",
+                    call.message.chat.id,
+                    call.message.message_id
+                )
+                
+                # Simulate transaction processing
+                success_text = f"""
+✅ **העסקה בוצעה!**
+
+**📤 נשלח:** {amount:.4f} TON
+**👥 לכתובת:** `{address}`
+**🆔 מזהה עסקה:** `{self.generate_tx_id()}`
+**⏱️ סטטוס:** מאושר
+
+**💎 איזון מעודכן:** 0.00 TON
+                """
+                
+                self.bot.send_message(
+                    call.message.chat.id,
+                    success_text,
+                    parse_mode='Markdown'
+                )
+                
+            except Exception as e:
+                self.bot.edit_message_text(
+                    "❌ **שגיאה בעיבוד העסקה**\n\nאנא נסה שוב מאוחר יותר.",
+                    call.message.chat.id,
+                    call.message.message_id
+                )
+                
+        elif call.data == "cancel_send":
+            self.bot.edit_message_text(
+                "❌ **העסקה בוטלה**\n\nהשילוח לא בוצע.",
+                call.message.chat.id,
+                call.message.message_id
+            )
+            
+        elif call.data == "copy_address":
+            self.bot.answer_callback_query(call.id, "📋 הכתובת הועתקה!")
+            
+        elif call.data == "new_wallet":
+            self.bot.edit_message_text(
+                "🔄 **יוצר ארנק חדש...**\n\nאנא המתן...",
+                call.message.chat.id,
+                call.message.message_id
+            )
+            
+            # Simulate wallet creation
+            new_wallet_text = """
+✅ **ארנק חדש נוצר!**
+
+**🔐 ארנק חדש נוצר בהצלחה.**
+**📧 הכתובת החדשה תוצג בעוד מספר שניות.**
+
+⚠️ **חשוב:** שמור את מפתח הגישה החדש במקום בטוח!
+            """
+            
+            self.bot.send_message(
+                call.message.chat.id,
+                new_wallet_text,
+                parse_mode='Markdown'
+            )
+
+    def generate_wallet_address(self):
+        """Generate mock wallet address"""
+        return "EQ" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=48))
+
+    def generate_tx_id(self):
+        """Generate mock transaction ID"""
+        chars = string.hexdigits.lower()
+        return ''.join(random.choice(chars) for _ in range(64))
+
+    def run(self):
+        """Start the bot"""
+        print(f"🤖 Starting TON Coin Bot...")
+        self.bot.infinity_polling(timeout=60, long_polling_timeout=60)
+
+def create_ton_bot(token):
+    """Factory function to create TON bot instance"""
+    return TONCoinBot(token)
